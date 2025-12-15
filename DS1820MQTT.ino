@@ -33,9 +33,9 @@ LED               led;                            //
 #define LOG_LEVEL 2
 #include <Logging.h>
 
-void LOG_CALLBACK(char *msg) { 
-  LOG_REMOVE_NEWLINE(msg);
-  mqtt.publish("RemoteTemp/log", msg, true); 
+void LOG_CALLBACK(const char *msg) { 
+//  mqtt.publish("RemoteTemp/log", msg, true); 
+  Serial.println(msg); 
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -61,11 +61,10 @@ void mqtt_connect() {
   INFO("Remote temperature v%s saying hello\n", VERSION);
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////////////
 //
 ///////////////////////////////////////////////////////////////////////////////////////
-DateTime bedtime;
+DateTime resync;
 
 void sync_clock()
 {
@@ -74,37 +73,11 @@ void sync_clock()
   DEBUG("Clock synchronized to %s\n", now.timestamp().c_str());
   
   // set deepsleep for 23:00 today, or if its already past we set the deepsleep for 5 minutes past 0:00
-  bedtime = now + TimeSpan(0,12,0,0);  // RE SYNC IN 12 HOURS
+  resync = now + TimeSpan(0,12,0,0);  // RE SYNC IN 12 HOURS
 
   INFO("[%s] - Clock synchronized and resync at %s\n", 
               now.timestamp(DateTime::TIMESTAMP_TIME).c_str(), 
-              bedtime.timestamp().c_str());
-}
-
-///////////////////////////////////////////////////////////////////////////////////////
-bool deep_sleep(DateTime &now)
-{
-#if (0) // enable to use deepsleep
-  // deepsleep requires D0 (GPIO16) to be hard wired with the RST pin. According to some web pages this may cause issues uploading firmware
-  // we need to test if this also applies to OTA. So for now we stick to a Restart instead of Sleep
-
-  // TODO: instead of 5:30 use sunrise - 30 minutes
-  DateTime wakeupTime(now.year(), now.month(), now.day(), now.hour(), now.minute()+2, 0);    // note the time constructed might be invalid due to the incremented day
-  INFO("[%s] - Its time to enter Deepsleep, I have set the wakeup time for %s\n", 
-          now.timestamp(DateTime::TIMESTAMP_TIME).c_str(),
-          wakeupTime.timestamp().c_str());
-  int secondsUntilWakeup = wakeupTime.unixtime() - now.unixtime();      // however the unixtime returned will still be valid
-
-  INFO("We are about to completely turn of the Wifi, so this is the last you here from me\n");
-  INFO("According to my calculations I will wake up in %d seconds.... CU!!\n", secondsUntilWakeup);
-  // wait 2 seconds
-  delay(2000);  
-  // SLEEPING........
-  ESP.deepSleep(secondsUntilWakeup * 1e6);//, RF_DISABLED);
-#endif
-  // default -> Sync clock and reconfigure next sync/reboot/sleep time
-  sync_clock(); 
-  return true;
+              resync.timestamp().c_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -115,13 +88,13 @@ Timer T_Throttle;
 enum ProxyMode {
   NOTHING,
   BLINK,
-  SLEEP
+  SYNC
 };
 
 int scheduler(DateTime &now)
 {
-  if (now > bedtime)  // its past bedtime
-    return SLEEP;
+  if (now > resync)  // its past bedtime
+    return SYNC;
 
   if (T_Throttle.passed()) {
     T_Throttle.set(5000);
@@ -187,8 +160,8 @@ void loop()
   default:
   case NOTHING:
     break;
-  case SLEEP:
-    deep_sleep(now);
+  case SYNC:
+    sync_clock(); 
     break;
   case BLINK:
     led.blink();
